@@ -90,8 +90,12 @@ public static class EntryPoint
     {
         _loader.Manager.LoaderApi.GetController<IReloadedHooks>().TryGetTarget(out var hooks);
 
-        var setupHooksTask = Task.Run(() => ExecuteTimed("Setting Up Hooks (Async)", () => SetupHooks(hooks)));
         InitialiseParameters(parameters);
+        var bootstrapperPath = _parameters.SupportsDllPath && _parameters.DllPath != null
+            ? Marshal.PtrToStringUni((nint)_parameters.DllPath) : null;
+        var skipSteamHooks = SteamHookPolicy.ShouldSkip(_process.MainModule.FileName,
+            (_parameters.Flags & EntryPointFlags.LoadedExternally) != 0, bootstrapperPath);
+        var setupHooksTask = Task.Run(() => ExecuteTimed("Setting Up Hooks (Async)", () => SetupHooks(hooks, skipSteamHooks)));
         if (_parameters.SupportsDllPath && _parameters.DllPath != null)
         {
             var reloadedPath = Marshal.PtrToStringUni((nint)_parameters.DllPath);
@@ -126,7 +130,7 @@ public static class EntryPoint
         }
     }
 
-    private static unsafe void SetupHooks(IReloadedHooks hooks)
+    private static unsafe void SetupHooks(IReloadedHooks hooks, bool skipSteamHooks)
     {
         // Hook ExitProcess to ensure log save on process exit.
         _exitHook = new ProcessExitHook(SaveAndFlushLog, hooks);
@@ -137,7 +141,8 @@ public static class EntryPoint
             _loader.Console.OnConsoleClose += SaveAndFlushLog;
 
         // Hook Steam
-        _steamHook = new SteamHook(hooks, _loader.Logger, Path.GetDirectoryName(_process.MainModule.FileName));
+        if (!skipSteamHooks)
+            _steamHook = new SteamHook(hooks, _loader.Logger, Path.GetDirectoryName(_process.MainModule.FileName));
     }
 
     private static void LoadMods(IReloadedHooks hooks)
